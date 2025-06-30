@@ -19,8 +19,15 @@ class _MyAppState extends State<MyApp> {
   final _androidFolderPermissionPlugin = AndroidFolderPermission();
 
   static const _folderPath =
-      // 'Android/media/com.whatsapp/WhatsApp/Media/.Statuses';
-      'Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses';
+      'Android/media/com.whatsapp/WhatsApp/Media/.Statuses';
+  // 'Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses';
+  //'WhatsApp/Media/.Statuses';
+
+  @override
+  void initState() {
+    super.initState();
+    checkFolderPermission();
+  }
 
   Future<void> checkFolderPermission() async {
     try {
@@ -37,6 +44,7 @@ class _MyAppState extends State<MyApp> {
     try {
       final result = await _androidFolderPermissionPlugin
           .requestFolderPermission(path: _folderPath);
+      await checkFolderPermission();
       debugPrint('result: $result');
     } on PlatformException catch (e) {
       debugPrint('error: ${e.message}');
@@ -47,14 +55,14 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(title: const Text('Plugin example app')),
+        appBar: AppBar(title: const Text('Android Folder Permission')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('Running on: $_hasFolderPermission'),
+                Text('Is Permission Granted: $_hasFolderPermission'),
                 SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: checkFolderPermission,
