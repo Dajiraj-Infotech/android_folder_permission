@@ -10,6 +10,7 @@ import android.os.Build.VERSION.SDK_INT
 import android.os.Parcelable
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,14 +24,13 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.PluginRegistry
 
 /** AndroidFolderPermissionPlugin */
-class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
+    PluginRegistry.ActivityResultListener {
 
     lateinit var context: Context
     private lateinit var channel: MethodChannel
     private var activity: Activity? = null
-    private var activityResultLauncher: ActivityResultLauncher<Intent>? = null
-    private var useModernApi = false
-    private var pendingResultPair: Pair<MethodCall, MethodChannel.Result>? = null
+    private var pendingResult: MethodChannel.Result? = null
     val OPEN_DOCUMENT_TREE_CODE = 10
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
@@ -41,76 +41,12 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         this.activity = binding.activity
-        activityResultListener(binding)
+        binding.addActivityResultListener(this)
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         this.activity = binding.activity
-        activityResultListener(binding)
-    }
-
-    fun activityResultListener(binding: ActivityPluginBinding) {
-        // Try to use modern ActivityResultLauncher
-        val componentActivity = binding.activity as? ComponentActivity
-        if (componentActivity != null) {
-            try {
-                activityResultLauncher = componentActivity.registerForActivityResult(
-                    ActivityResultContracts.StartActivityForResult()
-                ) { result ->
-                    if (result.resultCode == Activity.RESULT_OK) {
-                        val intent = result.data
-                        if (intent != null && intent.data != null) {
-                            val uri = intent.data!!
-                            context.contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            )
-
-                            // Find and return the result to the pending request
-                            pendingResultPair?.second?.success(uri.toString())
-                            pendingResultPair = null
-                        } else {
-                            // Handle case where no URI was returned
-                            pendingResultPair?.second?.error(
-                                "NO_URI", "No URI returned from folder selection", null
-                            )
-                            pendingResultPair = null
-                        }
-                    } else {
-                        // Handle user cancellation or error
-                        pendingResultPair?.second?.error(
-                            "PERMISSION_DENIED", "User denied folder permission", null
-                        )
-                        pendingResultPair = null
-                    }
-                }
-                useModernApi = true
-            } catch (e: Exception) {
-                // Fallback to traditional approach
-                useModernApi = false
-                binding.addActivityResultListener(object : PluginRegistry.ActivityResultListener {
-                    override fun onActivityResult(
-                        requestCode: Int, resultCode: Int, data: Intent?
-                    ): Boolean {
-                        return this@AndroidFolderPermissionPlugin.onActivityResult(
-                            requestCode, resultCode, data
-                        )
-                    }
-                })
-            }
-        } else {
-            // Fallback to traditional approach
-            useModernApi = false
-            binding.addActivityResultListener(object : PluginRegistry.ActivityResultListener {
-                override fun onActivityResult(
-                    requestCode: Int, resultCode: Int, data: Intent?
-                ): Boolean {
-                    return this@AndroidFolderPermissionPlugin.onActivityResult(
-                        requestCode, resultCode, data
-                    )
-                }
-            })
-        }
+        binding.addActivityResultListener(this)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -174,20 +110,16 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
                 }
             }
 
-            if (pendingResultPair != null) {
+            if (pendingResult != null) {
                 result.error(
                     "PENDING_REQUEST", "Another permission request is already pending", null
                 )
                 return
             }
 
-            pendingResultPair = Pair(call, result)
+            pendingResult = result
 
-            // Try modern API first, fallback to traditional approach
-            if (useModernApi && activityResultLauncher != null) {
-                activityResultLauncher?.launch(intent)
-            } else if (activity != null) {
-                // Fallback to traditional startActivityForResult
+            if (activity != null) {
                 activity?.startActivityForResult(intent, OPEN_DOCUMENT_TREE_CODE)
             } else {
                 result.error("NO_ACTIVITY", "Cannot access activity", null)
@@ -198,31 +130,32 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
         }
     }
 
-    private fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode == OPEN_DOCUMENT_TREE_CODE) {
-            if (pendingResultPair != null) {
-                try {
-                    if (resultCode == Activity.RESULT_OK && data != null) {
-                        val uri = data.data
-                        if (uri != null) {
-                            context.contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            )
-                            pendingResultPair?.second?.success(uri.toString())
-                        } else {
-                            pendingResultPair?.second?.error(
-                                "NO_URI", "No URI returned from folder selection", null
-                            )
-                        }
+            try {
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    val uri = data.data
+                    if (uri != null) {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                        pendingResult?.success(uri.toString())
                     } else {
-                        pendingResultPair?.second?.error(
-                            "PERMISSION_DENIED", "User denied folder permission", null
+                        pendingResult?.error(
+                            "NO_URI", "No URI returned from folder selection", null
                         )
                     }
-                } finally {
-                    pendingResultPair = null
+                } else {
+                    pendingResult?.error(
+                        "PERMISSION_DENIED", "User denied folder permission", null
+                    )
                 }
+            } catch (e: Exception) {
+                Log.d("OnActivity failure", "ON_ACTIVITY_RESULT FAILED WITH EXCEPTION\n$e")
+                pendingResult?.error("PERMISSION_ERROR", e.message, null)
+            } finally {
+                pendingResult = null
             }
             return true // Indicate that we handled this result
         }
@@ -231,12 +164,10 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
 
     override fun onDetachedFromActivity() {
         this.activity = null
-        this.activityResultLauncher = null
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
         this.activity = null
-        this.activityResultLauncher = null
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
