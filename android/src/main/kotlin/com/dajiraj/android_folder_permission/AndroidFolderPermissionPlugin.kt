@@ -20,151 +20,199 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.PluginRegistry
 
-/** AndroidFolderPermissionPlugin */
+/**
+ * AndroidFolderPermissionPlugin
+ *
+ * A Flutter plugin for handling Android folder permissions using SAF (Storage Access Framework).
+ * Provides methods to check and request folder permissions for accessing external storage.
+ */
 class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     PluginRegistry.ActivityResultListener {
 
-    lateinit var context: Context
+    companion object {
+        private const val TAG = "AndroidFolderPermission"
+        private const val CHANNEL_NAME = "android_folder_permission"
+        private const val OPEN_DOCUMENT_TREE_CODE = 10
+
+        // Method names
+        private const val METHOD_CHECK_PERMISSION = "checkFolderPermission"
+        private const val METHOD_REQUEST_PERMISSION = "requestFolderPermission"
+
+        // Error codes
+        private const val ERROR_PERMISSION_ALREADY_GRANTED = "PERMISSION_ALREADY_GRANTED"
+        private const val ERROR_PENDING_REQUEST = "PENDING_REQUEST"
+        private const val ERROR_NO_ACTIVITY = "NO_ACTIVITY"
+        private const val ERROR_PERMISSION_ERROR = "PERMISSION_ERROR"
+        private const val ERROR_NO_URI = "NO_URI"
+        private const val ERROR_PERMISSION_DENIED = "PERMISSION_DENIED"
+
+        // Argument names
+        private const val ARG_FOLDER_PATH = "folderPath"
+    }
+
+    private lateinit var context: Context
     private lateinit var channel: MethodChannel
     private var activity: Activity? = null
     private var pendingResult: MethodChannel.Result? = null
-    val OPEN_DOCUMENT_TREE_CODE = 10
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        this.context = flutterPluginBinding.applicationContext
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "android_folder_permission")
+        context = flutterPluginBinding.applicationContext
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL_NAME)
         channel.setMethodCallHandler(this)
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        this.activity = binding.activity
+        activity = binding.activity
         binding.addActivityResultListener(this)
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        this.activity = binding.activity
+        activity = binding.activity
         binding.addActivityResultListener(this)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "checkFolderPermission" -> {
-                val hasPermission = checkFolderPermission(call)
-                result.success(hasPermission)
-            }
-
-            "requestFolderPermission" -> {
-                val hasPermission = checkFolderPermission(call)
-                if (!hasPermission) {
-                    openDocumentTree(call, result)
-                } else {
-                    result.error(
-                        "PERMISSION_ALREADY_GRANTED", "Permission already granted", null
-                    )
-                }
-            }
-
+            METHOD_CHECK_PERMISSION -> handleCheckPermission(call, result)
+            METHOD_REQUEST_PERMISSION -> handleRequestPermission(call, result)
             else -> result.notImplemented()
         }
     }
 
-    private fun checkFolderPermission(call: MethodCall): Boolean {
+    private fun handleCheckPermission(call: MethodCall, result: MethodChannel.Result) {
         try {
-            val path = call.argument<String>("folderPath")
-            if (path != null) {
-                val uriPermissions = context.contentResolver.persistedUriPermissions
-                return uriPermissions.any {
-                    it.uri.path?.contains(path) == true && it.isReadPermission
-                }
-            }
-            return false
+            val hasPermission = checkFolderPermission(call)
+            result.success(hasPermission)
         } catch (e: Exception) {
-            return false
+            Log.e(TAG, "Error checking folder permission", e)
+            result.error(ERROR_PERMISSION_ERROR, e.message, null)
+        }
+    }
+
+    private fun handleRequestPermission(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val hasPermission = checkFolderPermission(call)
+            if (hasPermission) {
+                result.error(ERROR_PERMISSION_ALREADY_GRANTED, "Permission already granted", null)
+                return
+            }
+
+            if (pendingResult != null) {
+                result.error(
+                    ERROR_PENDING_REQUEST, "Another permission request is already pending", null
+                )
+                return
+            }
+
+            openDocumentTree(call, result)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting folder permission", e)
+            result.error(ERROR_PERMISSION_ERROR, e.message, null)
+        }
+    }
+
+    private fun checkFolderPermission(call: MethodCall): Boolean {
+        val path = call.argument<String>(ARG_FOLDER_PATH) ?: return false
+
+        return try {
+            val uriPermissions = context.contentResolver.persistedUriPermissions
+            uriPermissions.any { permission ->
+                permission.uri.path?.contains(path) == true && permission.isReadPermission
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking persisted URI permissions", e)
+            false
         }
     }
 
     @TargetApi(Build.VERSION_CODES.O)
     private fun openDocumentTree(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            val path = call.argument<String>("folderPath")
+        val path = call.argument<String>(ARG_FOLDER_PATH)
+        val currentActivity = activity
 
+        if (currentActivity == null) {
+            result.error(ERROR_NO_ACTIVITY, "Cannot access activity", null)
+            return
+        }
+
+        try {
             val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
             val intent = storageManager.primaryStorageVolume.createOpenDocumentTreeIntent()
 
-            if (path != null) {
-                val targetDirectory = Uri.encode(path)
+            // Configure initial URI if path is provided
+            val targetDirectory = Uri.encode(path)
 
-                // Get the initial URI from the intent
-                val initialUri = intent.parcelable<Uri>(DocumentsContract.EXTRA_INITIAL_URI)
+            // Get the initial URI from the intent
+            val initialUri = intent.parcelable<Uri>(DocumentsContract.EXTRA_INITIAL_URI)
 
-                if (initialUri != null) {
-                    var scheme = initialUri.toString()
-                    scheme = scheme.replace("/root/", "/document/")
-                    scheme += "%3A$targetDirectory"
+            if (initialUri != null) {
+                val scheme = initialUri.toString().replace("/root/", "/document/")
+                    .plus("%3A$targetDirectory")
 
-                    val uri = Uri.parse(scheme)
-                    intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
-                }
-            }
-
-            if (pendingResult != null) {
-                result.error(
-                    "PENDING_REQUEST", "Another permission request is already pending", null
-                )
-                return
+                val uri = Uri.parse(scheme)
+                intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
             }
 
             pendingResult = result
-
-            if (activity != null) {
-                activity?.startActivityForResult(intent, OPEN_DOCUMENT_TREE_CODE)
-            } else {
-                result.error("NO_ACTIVITY", "Cannot access activity", null)
-            }
+            currentActivity.startActivityForResult(intent, OPEN_DOCUMENT_TREE_CODE)
 
         } catch (e: Exception) {
-            result.error("PERMISSION_ERROR", e.message, null)
+            Log.e(TAG, "Error opening document tree", e)
+            result.error(ERROR_PERMISSION_ERROR, e.message, null)
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode == OPEN_DOCUMENT_TREE_CODE) {
-            try {
-                if (resultCode == Activity.RESULT_OK && data != null) {
-                    val uri = data.data
-                    if (uri != null) {
-                        context.contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                        pendingResult?.success(uri.toString())
-                    } else {
-                        pendingResult?.error(
-                            "NO_URI", "No URI returned from folder selection", null
-                        )
-                    }
-                } else {
+        if (requestCode != OPEN_DOCUMENT_TREE_CODE) return false
+
+        try {
+            when {
+                resultCode == Activity.RESULT_OK && data?.data != null -> {
+                    handleSuccessfulPermissionGrant(data.data!!, pendingResult)
+                }
+
+                resultCode == Activity.RESULT_CANCELED -> {
                     pendingResult?.error(
-                        "PERMISSION_DENIED", "User denied folder permission", null
+                        ERROR_PERMISSION_DENIED, "User denied folder permission", null
                     )
                 }
-            } catch (e: Exception) {
-                Log.d("OnActivity failure", "ON_ACTIVITY_RESULT FAILED WITH EXCEPTION\n$e")
-                pendingResult?.error("PERMISSION_ERROR", e.message, null)
-            } finally {
-                pendingResult = null
+
+                else -> {
+                    pendingResult?.error(
+                        ERROR_NO_URI, "No URI returned from folder selection", null
+                    )
+                }
             }
-            return true // Indicate that we handled this result
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling activity result", e)
+            pendingResult?.error(ERROR_PERMISSION_ERROR, e.message, null)
+        } finally {
+            pendingResult = null
         }
-        return false // We didn't handle this result
+
+        return true
+    }
+
+    private fun handleSuccessfulPermissionGrant(uri: Uri, result: MethodChannel.Result?) {
+        try {
+            val flags =
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+            result?.success(uri.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error taking persistable URI permission", e)
+            result?.error(
+                ERROR_PERMISSION_ERROR, "Failed to persist URI permission: ${e.message}", null
+            )
+        }
     }
 
     override fun onDetachedFromActivity() {
-        this.activity = null
+        activity = null
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        this.activity = null
+        activity = null
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
