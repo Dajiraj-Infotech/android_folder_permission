@@ -1,8 +1,7 @@
+import 'package:android_folder_permission/android_folder_permission.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
-
 import 'package:flutter/services.dart';
-import 'package:android_folder_permission/android_folder_permission.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,46 +15,61 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
+  bool _hasFolderPermission = false;
   final _androidFolderPermissionPlugin = AndroidFolderPermission();
 
-  @override
-  void initState() {
-    super.initState();
-    initPlatformState();
+  static const _folderPath =
+      // 'Android/media/com.whatsapp/WhatsApp/Media/.Statuses';
+      'Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses';
+
+  Future<void> checkFolderPermission() async {
+    try {
+      _hasFolderPermission = await _androidFolderPermissionPlugin
+          .checkFolderPermission(path: _folderPath);
+    } on PlatformException {
+      _hasFolderPermission = false;
+    }
+    if (!mounted) return;
+    setState(() => _hasFolderPermission = _hasFolderPermission);
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
+  Future<void> requestFolderPermission() async {
     try {
-      platformVersion =
-          await _androidFolderPermissionPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
+      final result = await _androidFolderPermissionPlugin
+          .requestFolderPermission(path: _folderPath);
+      debugPrint('result: $result');
+    } on PlatformException catch (e) {
+      debugPrint('error: ${e.message}');
     }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Plugin example app'),
-        ),
+        appBar: AppBar(title: const Text('Plugin example app')),
         body: Center(
-          child: Text('Running on: $_platformVersion\n'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('Running on: $_hasFolderPermission'),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: checkFolderPermission,
+                  child: const Text('Check Folder Permission'),
+                ),
+                SizedBox(height: 16),
+                Text('Folder path: $_folderPath', textAlign: TextAlign.center),
+                SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: requestFolderPermission,
+                  child: const Text('Request Folder Permission'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

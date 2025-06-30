@@ -8,7 +8,8 @@ abstract class AndroidFolderPermissionPlatform extends PlatformInterface {
 
   static final Object _token = Object();
 
-  static AndroidFolderPermissionPlatform _instance = MethodChannelAndroidFolderPermission();
+  static AndroidFolderPermissionPlatform _instance =
+      MethodChannelAndroidFolderPermission();
 
   /// The default instance of [AndroidFolderPermissionPlatform] to use.
   ///
@@ -23,7 +24,15 @@ abstract class AndroidFolderPermissionPlatform extends PlatformInterface {
     _instance = instance;
   }
 
-  Future<String?> getPlatformVersion() {
-    throw UnimplementedError('platformVersion() has not been implemented.');
+  Future<bool> checkFolderPermission({required String folderPath}) {
+    throw UnimplementedError(
+      'checkFolderPermission() has not been implemented.',
+    );
+  }
+
+  Future<String> requestFolderPermission({required String folderPath}) {
+    throw UnimplementedError(
+      'requestFolderPermission() has not been implemented.',
+    );
   }
 }
