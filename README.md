@@ -44,7 +44,7 @@ Check if your app already has permission to access a specific folder:
 Future<void> checkFolderPermission() async {
   try {
     bool hasPermission = await _androidFolderPermissionPlugin
-        .checkFolderPermission(path: 'Android/media/com.whatsapp/WhatsApp/Media/.Statuses');
+        .checkFolderPermission(path: 'folder_path');
     
     print('Has permission: $hasPermission');
   } on PlatformException catch (e) {
@@ -61,7 +61,7 @@ Request permission to access a folder. This will open the Android folder picker:
 Future<void> requestFolderPermission() async {
   try {
     String result = await _androidFolderPermissionPlugin
-        .requestFolderPermission(path: 'Android/media/com.whatsapp/WhatsApp/Media/.Statuses');
+        .requestFolderPermission(path: 'folder_path');
     
     print('Permission granted. URI: $result');
   } on PlatformException catch (e) {
