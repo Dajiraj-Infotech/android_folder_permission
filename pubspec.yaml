@@ -1,7 +1,7 @@
 name: android_folder_permission
 description: "A new Flutter project."
 version: 0.0.1
-homepage:
+homepage: https://www.dajiraj.com
 
 environment:
   sdk: ^3.8.1
