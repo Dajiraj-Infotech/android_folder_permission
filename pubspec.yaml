@@ -1,5 +1,5 @@
 name: android_folder_permission
-description: "A new Flutter project."
+description: "A Flutter plugin for managing Android folder permissions."
 version: 0.0.1
 homepage: https://www.dajiraj.com
 
