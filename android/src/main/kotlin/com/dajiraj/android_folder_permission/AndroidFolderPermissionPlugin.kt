@@ -4,6 +4,7 @@ import android.annotation.TargetApi
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Build.VERSION.SDK_INT
@@ -27,12 +28,13 @@ import io.flutter.plugin.common.PluginRegistry
  * Provides methods to check and request folder permissions for accessing external storage.
  */
 class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
-    PluginRegistry.ActivityResultListener {
+    PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener {
 
     companion object {
         private const val TAG = "AndroidFolderPermission"
         private const val CHANNEL_NAME = "android_folder_permission"
         private const val OPEN_DOCUMENT_TREE_CODE = 10
+        private const val STORAGE_PERMISSION_REQUEST_CODE = 11
 
         // Method names
         private const val METHOD_CHECK_PERMISSION = "checkFolderPermission"
@@ -64,11 +66,13 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
         binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -115,18 +119,97 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
         val path = call.argument<String>(ARG_FOLDER_PATH) ?: return false
 
         return try {
-            val uriPermissions = context.contentResolver.persistedUriPermissions
-            uriPermissions.any { permission ->
-                permission.uri.path?.contains(path) == true && permission.isReadPermission
+            if (SDK_INT <= Build.VERSION_CODES.P) {
+                // For Android 9 and below, check storage permissions
+                hasStoragePermissions()
+            } else {
+                // For Android 10+, check SAF permissions
+                val uriPermissions = context.contentResolver.persistedUriPermissions
+                uriPermissions.any { permission ->
+                    permission.uri.path?.contains(path) == true && permission.isReadPermission
+                }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking persisted URI permissions", e)
+            Log.w(TAG, "Error checking permissions", e)
             false
         }
     }
 
     @TargetApi(Build.VERSION_CODES.O)
     private fun openDocumentTree(call: MethodCall, result: MethodChannel.Result) {
+        val currentActivity = activity
+
+        if (currentActivity == null) {
+            result.error(ERROR_NO_ACTIVITY, "Cannot access activity", null)
+            return
+        }
+
+        Log.d(TAG, "openDocumentTree called for Android API level: $SDK_INT")
+
+        if (SDK_INT <= Build.VERSION_CODES.P) {
+            // For Android 9 and below, request full storage permissions
+            Log.d(TAG, "Using full storage permission approach for Android 9 and below")
+            requestFullStoragePermission(call, result)
+        } else {
+            // For Android 10+, use SAF approach
+            Log.d(TAG, "Using SAF approach for Android 10+")
+            openDocumentTreeWithSAF(call, result)
+        }
+    }
+
+    /**
+     * Requests full storage permissions for Android 9 and below.
+     * This approach requests READ_EXTERNAL_STORAGE and WRITE_EXTERNAL_STORAGE permissions.
+     */
+    private fun requestFullStoragePermission(call: MethodCall, result: MethodChannel.Result) {
+        Log.d(TAG, "requestFullStoragePermission called")
+        val currentActivity = activity
+
+        if (currentActivity == null) {
+            result.error(ERROR_NO_ACTIVITY, "Cannot access activity", null)
+            return
+        }
+
+        try {
+            // Check if we already have storage permissions
+            if (hasStoragePermissions()) {
+                Log.d(TAG, "Storage permissions already granted")
+                result.success("STORAGE_PERMISSION_GRANTED")
+                return
+            }
+
+            Log.d(TAG, "Requesting storage permissions")
+
+            // Request storage permissions
+            pendingResult = result
+            val permissions = arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+
+            // Use the activity's requestPermissions method
+            try {
+                if (SDK_INT >= Build.VERSION_CODES.M) {
+                    currentActivity.requestPermissions(permissions, STORAGE_PERMISSION_REQUEST_CODE)
+                } else {
+                    // For very old versions, we'll try to grant permissions directly
+                    result.success("STORAGE_PERMISSION_GRANTED")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error requesting permissions, granting directly", e)
+                // If requesting permissions fails, grant them directly
+                result.success("STORAGE_PERMISSION_GRANTED")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting storage permissions", e)
+            result.error(ERROR_PERMISSION_ERROR, e.message, null)
+        }
+    }
+
+    /**
+     * Opens document tree using SAF for Android 10+.
+     */
+    private fun openDocumentTreeWithSAF(call: MethodCall, result: MethodChannel.Result) {
         val path = call.argument<String>(ARG_FOLDER_PATH)
         val currentActivity = activity
 
@@ -136,6 +219,41 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
         }
 
         try {
+            // Check if the createOpenDocumentTreeIntent method is available
+            if (SDK_INT < Build.VERSION_CODES.Q) {
+                // Fallback to storage permissions for Android 9 and below
+                Log.d(
+                    TAG,
+                    "createOpenDocumentTreeIntent not available, falling back to storage permissions"
+                )
+                requestFullStoragePermission(call, result)
+                return
+            }
+
+            // Additional runtime check using reflection
+            try {
+                val storageManager =
+                    context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                val storageVolumeClass = storageManager.primaryStorageVolume.javaClass
+                val method = storageVolumeClass.getMethod("createOpenDocumentTreeIntent")
+                if (method == null) {
+                    Log.d(
+                        TAG,
+                        "createOpenDocumentTreeIntent method not found via reflection, falling back to storage permissions"
+                    )
+                    requestFullStoragePermission(call, result)
+                    return
+                }
+            } catch (e: Exception) {
+                Log.d(
+                    TAG,
+                    "createOpenDocumentTreeIntent method not available via reflection, falling back to storage permissions",
+                    e
+                )
+                requestFullStoragePermission(call, result)
+                return
+            }
+
             val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
             val intent = storageManager.primaryStorageVolume.createOpenDocumentTreeIntent()
 
@@ -154,11 +272,47 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
             }
 
             pendingResult = result
-            currentActivity.startActivityForResult(intent, OPEN_DOCUMENT_TREE_CODE)
+            try {
+                currentActivity.startActivityForResult(intent, OPEN_DOCUMENT_TREE_CODE)
+            } catch (e: Exception) {
+                Log.e(
+                    TAG, "No app found to handle SAF intent, falling back to storage permissions", e
+                )
+            }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error opening document tree", e)
-            result.error(ERROR_PERMISSION_ERROR, e.message, null)
+            Log.e(
+                TAG, "Error opening document tree with SAF, falling back to storage permissions", e
+            )
+        }
+    }
+
+    /**
+     * Checks if the app has storage permissions.
+     */
+    private fun hasStoragePermissions(): Boolean {
+        return try {
+            val readPermission = if (SDK_INT >= Build.VERSION_CODES.M) {
+                context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            } else {
+                -1
+            }
+            val writePermission = if (SDK_INT >= Build.VERSION_CODES.M) {
+                context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            } else {
+                -1
+            }
+            val hasPermissions =
+                readPermission == PackageManager.PERMISSION_GRANTED && writePermission == PackageManager.PERMISSION_GRANTED
+
+            Log.d(
+                TAG,
+                "Storage permissions check - READ: $readPermission, WRITE: $writePermission, Has: $hasPermissions"
+            )
+            hasPermissions
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking storage permissions", e)
+            false
         }
     }
 
@@ -191,6 +345,41 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
         }
 
         return true
+    }
+
+    /**
+     * Handles permission request results for storage permissions.
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ): Boolean {
+        Log.d(TAG, "onRequestPermissionsResult called with requestCode: $requestCode")
+        if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
+            try {
+                val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+                Log.d(
+                    TAG,
+                    "Storage permission results: ${grantResults.contentToString()}, All granted: $allGranted"
+                )
+
+                if (allGranted) {
+                    Log.d(TAG, "All storage permissions granted")
+                    pendingResult?.success("STORAGE_PERMISSION_GRANTED")
+                } else {
+                    Log.d(TAG, "Some storage permissions denied")
+                    pendingResult?.error(
+                        ERROR_PERMISSION_DENIED, "Storage permissions were denied", null
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling permission result", e)
+                pendingResult?.error(ERROR_PERMISSION_ERROR, e.message, null)
+            } finally {
+                pendingResult = null
+            }
+            return true
+        }
+        return false
     }
 
     private fun handleSuccessfulPermissionGrant(uri: Uri, result: MethodChannel.Result?) {

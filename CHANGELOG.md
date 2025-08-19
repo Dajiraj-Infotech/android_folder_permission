@@ -1,3 +1,18 @@
+## 0.0.3
+
+* **Permission Handling Enhancements:**
+  * Added support for requesting storage permissions on Android 9 (API level 28) and below
+  * Implemented `PluginRegistry.RequestPermissionsResultListener` for better permission result handling
+  * Enhanced error handling for permission requests with improved activity lifecycle management
+  * Added storage permission request code constant for better permission flow management
+  * Improved compatibility with older Android versions while maintaining modern API support
+
+* **Android Compatibility Improvements:**
+  * Better handling of different Android API levels for storage permissions
+  * Enhanced permission state management across app sessions
+  * Improved error handling for various permission scenarios
+  * Better integration with Android's permission system
+
 ## 0.0.2
 
 * Minor Fixes
