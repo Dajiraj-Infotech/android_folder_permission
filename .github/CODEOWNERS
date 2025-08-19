@@ -1,0 +1,7 @@
+# Global code ownership
+# This file defines who owns the code in this repository
+# For more information about CODEOWNERS, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+* @kumarpalsinh25
