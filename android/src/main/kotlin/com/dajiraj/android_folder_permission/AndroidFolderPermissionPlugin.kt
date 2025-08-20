@@ -119,11 +119,11 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
         val path = call.argument<String>(ARG_FOLDER_PATH) ?: return false
 
         return try {
-            if (SDK_INT <= Build.VERSION_CODES.P) {
-                // For Android 9 and below, check storage permissions
+            if (SDK_INT <= Build.VERSION_CODES.Q) {
+                // For Android 10 and below, check storage permissions
                 hasStoragePermissions()
             } else {
-                // For Android 10+, check SAF permissions
+                // For Android 11+, check SAF permissions
                 val uriPermissions = context.contentResolver.persistedUriPermissions
                 uriPermissions.any { permission ->
                     permission.uri.path?.contains(path) == true && permission.isReadPermission
@@ -146,19 +146,19 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
 
         Log.d(TAG, "openDocumentTree called for Android API level: $SDK_INT")
 
-        if (SDK_INT <= Build.VERSION_CODES.P) {
-            // For Android 9 and below, request full storage permissions
-            Log.d(TAG, "Using full storage permission approach for Android 9 and below")
+        if (SDK_INT <= Build.VERSION_CODES.Q) {
+            // For Android 10 and below, request full storage permissions
+            Log.d(TAG, "Using full storage permission approach for Android 10 and below")
             requestFullStoragePermission(call, result)
         } else {
-            // For Android 10+, use SAF approach
-            Log.d(TAG, "Using SAF approach for Android 10+")
+            // For Android 11+, use SAF approach
+            Log.d(TAG, "Using SAF approach for Android 11+")
             openDocumentTreeWithSAF(call, result)
         }
     }
 
     /**
-     * Requests full storage permissions for Android 9 and below.
+     * Requests full storage permissions for Android 10 and below.
      * This approach requests READ_EXTERNAL_STORAGE and WRITE_EXTERNAL_STORAGE permissions.
      */
     private fun requestFullStoragePermission(call: MethodCall, result: MethodChannel.Result) {
@@ -220,8 +220,8 @@ class AndroidFolderPermissionPlugin : FlutterPlugin, MethodCallHandler, Activity
 
         try {
             // Check if the createOpenDocumentTreeIntent method is available
-            if (SDK_INT < Build.VERSION_CODES.Q) {
-                // Fallback to storage permissions for Android 9 and below
+            if (SDK_INT < Build.VERSION_CODES.R) {
+                // Fallback to storage permissions for Android 10 and below
                 Log.d(
                     TAG,
                     "createOpenDocumentTreeIntent not available, falling back to storage permissions"

@@ -1,3 +1,9 @@
+## 0.0.4
+
+* **Android Version Handling Corrections:**
+  * Fixed incorrect Android API level references in permission handling logic
+  * Corrected storage permission approach for Android 10 and below (was incorrectly referencing Android 9)
+
 ## 0.0.3
 
 * **Permission Handling Enhancements:**
